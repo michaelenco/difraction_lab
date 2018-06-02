@@ -1,0 +1,215 @@
+<html>
+  <head></head>
+  <body>
+    <table>
+      <tr>
+        <td> Расстояние от полуплоскости<br> до экрана </td>
+        <td> <input id="height" oninput="redraw()" value="0.1"> </td>
+      </tr>
+      <tr>
+        <td> Длина волны </td>
+        <td> <input id="lambda" oninput="redraw()" value="0.0001"> </td>
+      </trvalue="0.0001">
+    </table>
+    <button onclick="zoomin()">+</button> <button onclick="zoomout()">-</button>: <span id="scale"></span><br>
+    <canvas id="cnv" onmousemove="mouseMove(event)" width="800" height="400"></canvas>
+    <script>
+      //численное решение интегралов Френеля описано в книге:
+      //Lozier DW, Olver FWJ. Numerical Evaluation of Special Functions in Mathematics of Computation
+      //согласно книге модуль ошибки расчета не превышает 2*10^-3
+      //область допустимых значений: 0 < x < ∞
+      //вспомогательные функции
+      function f(x) {
+        return (0.926*x + 1)/(2+(1.792*x)+(3.104*x*x))
+      }
+      function g(x) {
+        return 1/(2+(4.142*x)+(3.492*x*x)+(6.67*x*x*x))
+      }
+
+      //интегралы Френеля
+      function C(x) {
+        return 0.5+f(x)*Math.sin((x*x)*Math.PI/2)-g(x)*Math.cos((x*x)*Math.PI/2)
+      }
+
+      function S(x) {
+        return 0.5-f(x)*Math.cos((x*x)*Math.PI/2)-g(x)*Math.sin((x*x)*Math.PI/2)
+      }
+
+      //функция расчета координат точки спирали Корню соответствующей длине кривой x от начала координат
+      //так как спираль симметрична относительно центра координат, для расчета координат спирали
+      //соответствующих "отрицательной" длине берутся координаты с минусом соответствующие
+      //эквивалентной "положительной" длине
+      function clothoid(x) {
+        return {x: x>0 ? C(x) : -C(-x), y: x>0 ? S(x): -S(-x)}
+      }
+
+      //масштаб изображения дифракционной картины
+      let scale = 100
+      function zoomout() {
+        scale = scale/2
+        setScaleText()
+        redraw()
+      }
+      function zoomin() {
+        scale = scale*2
+        setScaleText()
+        redraw()
+      }
+      //отображение текущего масштаба
+      function setScaleText() {
+        document.getElementById('scale').textContent = scale + 'x'
+      }
+
+
+      //расстояние соответствующее px пикселей на холсте
+      function pxToM(px) {
+        return px / 0.264583 / scale / 1000
+      }
+
+      //количество пикселей в mm миллиметрах
+      function mToP(mm)  {
+        return Math.round(px * 0.264583 * scale * 1000)
+      }
+
+      //размеры холста
+      let width = 800
+      let height = 400
+
+      //размеры области для спирали
+      let clothoidSize = 200
+
+      //отступы от краев
+      let padding = 50
+
+      //положение грани полуплоскости
+      let centerOffset = 300
+
+      //получение контекста рисования
+      canvas = document.getElementById('cnv')
+      ctx = canvas.getContext('2d')
+      //обработчик движений мыши
+      function mouseMove(evt) {
+
+        //расчет x-координаты курсора относительно холста
+        var rect = canvas.getBoundingClientRect()
+        let position = evt.clientX - rect.left
+
+        redraw()
+
+        //отрисовка положения курсора
+        ctx.beginPath()
+        ctx.strokeStyle = '#00F'
+        ctx.moveTo(position, padding)
+        ctx.lineTo(position, height-padding)
+        ctx.stroke()
+
+        //область для отрисовки спирали
+        ctx.strokeStyle = '#000'
+        ctx.fillStyle = '#FFF'
+        ctx.setLineDash([])
+        ctx.fillRect(width-(clothoidSize+1), 1, clothoidSize, clothoidSize)
+        ctx.strokeRect(width-(clothoidSize+1), 1, clothoidSize, clothoidSize)
+
+        //отрисовка спирали корню
+
+        //расстояние до границы полуплоскости в метрах
+        let x = pxToM(position - padding - centerOffset)
+        //длина волны
+        let lambda = parseFloat(document.getElementById('lambda').value)
+        //расстояние от полуплоскости до экрана
+        let l = parseFloat(document.getElementById('height').value)
+
+        //длина спирали от начала координат
+        let s = x * Math.sqrt(2/(l*lambda))
+
+        function clothoidXYtoPosition({x, y}) {
+          return { x: width-clothoidSize/2+clothoidScale*x, y: clothoidSize/2-clothoidScale*y }
+        }
+
+        //масштаб отображения спирали
+        let clothoidScale = clothoidSize/3
+
+        //отрисовка спирали
+        ctx.beginPath()
+        let start = clothoid(s)
+        let startXY = clothoidXYtoPosition(start)
+        let end = {x: 0.5, y: 0.5}
+        let endXY = clothoidXYtoPosition(end)
+        ctx.moveTo(startXY.x, startXY.y)
+        for(let i=s; i<20; i+=0.1) {
+          let point = clothoid(i)
+          let pointXY = clothoidXYtoPosition(point)
+          ctx.lineTo(pointXY.x, pointXY.y)
+        }
+        ctx.strokeStyle = '#000'
+        ctx.setLineDash([])
+        ctx.stroke()
+
+        //отрисовка вектора амплитуды
+        ctx.beginPath()
+        ctx.moveTo(startXY.x, startXY.y)
+        ctx.lineTo(endXY.x, endXY.y)
+        ctx.strokeStyle = '#F00'
+        ctx.stroke()
+
+        //расчет цвета для амплитуды
+        function getRangeColor(range) {
+          return '#' + Math.round(255*range).toString(16).repeat(3)
+        }
+        let a = Math.sqrt(Math.pow(end.x-start.x,2) + Math.pow(end.y-start.y,2))
+        let intencity = a/Math.sqrt(2)
+
+
+        ctx.fillStyle='#000'
+        ctx.fillText('x='+x.toFixed(5)+'м', width-clothoidSize, 20)
+        ctx.fillText('i='+intencity.toFixed(2), width-clothoidSize, clothoidSize-20)
+      }
+      //перерисовка дифракционной картины
+      function redraw() {
+        //заливка холста белым цветом
+        ctx.fillStyle = '#FFF'
+        ctx.fillRect(0,0,width,height)
+
+        //длина волны
+        let lambda = parseFloat(document.getElementById('lambda').value)
+        //расстояние от полуплоскости до экрана
+        let l = parseFloat(document.getElementById('height').value)
+
+        //расчет градиента для дифракционной картины
+        let grad = ctx.createLinearGradient(0, 0, width - 2*padding, 0)
+        for(let i=0; i<=1; i+=0.005) {
+          //расстояние до границы полуплоскости в метрах
+          let x = pxToM((width - padding*2)*i - centerOffset - padding)
+
+          //длина спирали от начала координат
+          let s = x * Math.sqrt(2/(l*lambda))
+
+          let start = clothoid(s)
+          let end = {x: 0.5, y: 0.5}
+          
+          let a = Math.sqrt(Math.pow(end.x-start.x,2) + Math.pow(end.y-start.y,2))
+
+          //расчет цвета для амплитуды
+          function getRangeColor(range) {
+            return '#' + (('00'+Math.round(255*range).toString(16)).slice(-2)).repeat(3)
+          }
+            
+          grad.addColorStop(i.toString(), getRangeColor(a/1.7))
+        }
+        ctx.fillStyle=grad
+        ctx.fillRect(padding, padding, width-padding*2, height-padding*2)
+
+        //грань полуплоскости
+        ctx.beginPath()
+        ctx.strokeStyle = '#F00'
+        ctx.setLineDash([10])
+        ctx.moveTo(padding+centerOffset, padding)
+        ctx.lineTo(padding+centerOffset, height-padding)
+        ctx.stroke()
+      }
+
+      setScaleText()
+      redraw()
+    </script>
+  </body>
+</html>
